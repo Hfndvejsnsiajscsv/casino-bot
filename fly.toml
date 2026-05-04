@@ -1,5 +1,12 @@
-[env]
-  PORT = "8080"
+app = "casino-bot-1--fmw"
+primary_region = "mad"
 
-  [processes]
-  app = "botprueba.py"
+[build]
+
+[processes]
+  app = "python botprueba.py"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
