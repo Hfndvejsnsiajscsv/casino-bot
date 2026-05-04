@@ -14,7 +14,7 @@ import time
 # ════════════════════════════════
 
 
-TOKEN = "MTQ5OTM3MjQ2NzAzMzA4Mzk0NA.GkeHVJ.fzfXx8xn2rY1QtlRcd-9z0wXSj798oMGsyt6E4"
+TOKEN = os.getenv("MTQ5OTM3MjQ2NzAzMzA4Mzk0NA.GkeHVJ.fzfXx8xn2rY1QtlRcd-9z0wXSj798oMGsyt6E4")
 if not TOKEN:
     raise ValueError("❌ No se encontró DISCORD_TOKEN en las variables de entorno.")
 
