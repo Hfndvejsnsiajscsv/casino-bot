@@ -1,10 +1,14 @@
-app = "casino-bot-1--fmw"
+app = "casino-bot-fkp-lq"
 primary_region = "mad"
 
 [build]
+  dockerfile = "Dockerfile"
 
 [processes]
   app = "python botprueba.py"
+
+[deploy]
+  strategy = "immediate"
 
 [[vm]]
   memory = "256mb"
