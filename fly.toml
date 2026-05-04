@@ -1,16 +1,30 @@
-app = "casino-bot-fkp-lq"
-primary_region = "mad"
+# fly.toml app configuration file generated for casino-bot-4zcwmq on 2026-05-04T11:55:37Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'casino-bot-4zcwmq'
+primary_region = 'cdg'
 
 [build]
-  dockerfile = "Dockerfile"
-
-[processes]
-  app = "python botprueba.py"
+  dockerfile = 'Dockerfile'
 
 [deploy]
-  strategy = "immediate"
+  strategy = 'immediate'
+
+[processes]
+  app = 'python botprueba.py'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
 
 [[vm]]
-  memory = "256mb"
-  cpu_kind = "shared"
+  memory = '256mb'
+  cpu_kind = 'shared'
   cpus = 1
+  memory_mb = 256
