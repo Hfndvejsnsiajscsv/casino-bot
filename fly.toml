@@ -1,7 +1,5 @@
-[build]
-  builder = "paketobuildpacks/builder:base"
-
-[[services]]
-
 [env]
   PORT = "8080"
+
+  [processes]
+  app = "botprueba.py"
