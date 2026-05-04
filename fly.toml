@@ -1,10 +1,10 @@
-# fly.toml app configuration file generated for casino-bot-jj6mrq on 2026-05-04T11:03:29Z
+# fly.toml app configuration file generated for casino-bot-jj6mrq on 2026-05-04T11:12:14Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
 app = 'casino-bot-jj6mrq'
-primary_region = 'ams'
+primary_region = 'cdg'
 
 [build]
   builder = 'paketobuildpacks/builder:base'
