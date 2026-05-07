@@ -80,7 +80,11 @@ def generar_item_id():
             return nuevo_id
 
 def es_admin_guild(ctx):
-    return ctx.guild is not None and ctx.guild.id == ADMIN_GUILD_ID
+    return (
+        ctx.guild is not None and
+        ctx.guild.id == ADMIN_GUILD_ID and
+        ctx.author.guild_permissions.administrator
+    )
 
 # ════════════════════════════════
 # ❌ ERRORES
