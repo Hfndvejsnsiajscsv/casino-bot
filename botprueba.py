@@ -1,4 +1,3 @@
-
 import discord
 from discord.ext import commands
 import random
@@ -7,23 +6,9 @@ import asyncio
 import os
 import time
 
-# ════════════════════════════════
-# 🔐 TOKEN — pon tu token aquí directamente
-# ════════════════════════════════
-#<<<<<<< HEAD
-
-#=======
-#>>>>>>> f535446d2e35c8e82e3932b4751dfe9353aaefc6
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise ValueError("❌ No se encontró DISCORD_TOKEN en las variables de entorno.")
-# ════════════════════════════════
-# 🏪 ID DEL SERVIDOR ADMIN
-# Solo desde este servidor se pueden crear/editar/borrar items y usar comandos admin
-# Clic derecho en tu servidor en Discord → Copiar ID
-# ════════════════════════════════
-
-ADMIN_GUILD_ID = 123456789012345678  # <-- PON AQUÍ EL ID DE TU SERVIDOR
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -38,18 +23,22 @@ COLOR_ERROR = discord.Color.from_rgb(220, 50, 50)
 # 💾 BASE DE DATOS
 # ════════════════════════════════
 
-db      = {}
-tienda  = {}
-db_lock = asyncio.Lock()
+db       = {}
+tienda   = {}
+warns_db = {}
+db_lock  = asyncio.Lock()
 
 def cargar_db():
-    global db, tienda
+    global db, tienda, warns_db
     if os.path.exists("economia.json"):
         with open("economia.json", "r") as f:
             db = json.load(f)
     if os.path.exists("tienda.json"):
         with open("tienda.json", "r") as f:
             tienda = json.load(f)
+    if os.path.exists("warns.json"):
+        with open("warns.json", "r") as f:
+            warns_db = json.load(f)
 
 async def guardar_db():
     async with db_lock:
@@ -60,6 +49,11 @@ async def guardar_tienda():
     async with db_lock:
         with open("tienda.json", "w") as f:
             json.dump(tienda, f, indent=4, ensure_ascii=False)
+
+async def guardar_warns():
+    async with db_lock:
+        with open("warns.json", "w") as f:
+            json.dump(warns_db, f, indent=4)
 
 def get_user(uid):
     uid = str(uid)
@@ -82,7 +76,6 @@ def generar_item_id():
 def es_admin_guild(ctx):
     return (
         ctx.guild is not None and
-        ctx.guild.id == ADMIN_GUILD_ID and
         ctx.author.guild_permissions.administrator
     )
 
@@ -100,6 +93,8 @@ async def on_command_error(ctx, error):
         await ctx.send("❌ Falta un argumento. Usa `!help` para ver cómo usarlo.")
     elif isinstance(error, commands.BadArgument):
         await ctx.send("❌ Argumento inválido. Asegúrate de ingresar un número entero.")
+    elif isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ No tienes permisos para usar ese comando.")
     else:
         raise error
 
@@ -133,7 +128,15 @@ async def help(ctx):
     embed.add_field(name="💸 Transferencias", value=(
         "`!enviar @usuario <cantidad>` — Enviar dinero a otro jugador"
     ), inline=False)
-    if ctx.guild and ctx.guild.id == ADMIN_GUILD_ID:
+    embed.add_field(name="🛡️ Moderación", value=(
+        "`!delete <cantidad>` — Borrar mensajes (máx 100)\n"
+        "`!ban @usuario [razón]` — Banear usuario\n"
+        "`!unban <nombre#0000 o ID>` — Desbanear usuario\n"
+        "`!warn @usuario [razón]` — Advertir a un usuario\n"
+        "`!warns @usuario` — Ver advertencias de un usuario\n"
+        "`!clearwarns @usuario` — Eliminar todas sus advertencias"
+    ), inline=False)
+    if ctx.guild and ctx.author.guild_permissions.administrator:
         embed.add_field(name="🔧 Admin Tienda", value=(
             "`!crearitem` — Crear nuevo item (wizard interactivo)\n"
             "`!editaritem <id>` — Editar un item existente\n"
@@ -302,13 +305,13 @@ async def inventario(ctx):
     await ctx.send(embed=embed)
 
 # ════════════════════════════════
-# 🔧 ADMIN — CREAR ITEM (wizard)
+# 🔧 ADMIN — CREAR ITEM
 # ════════════════════════════════
 
 @bot.command()
 async def crearitem(ctx):
     if not es_admin_guild(ctx):
-        return await ctx.send("❌ Este comando solo puede usarse en el servidor autorizado.")
+        return await ctx.send("❌ Necesitas ser administrador para usar este comando.")
     await ctx.send(embed=discord.Embed(
         title="🔧 Crear nuevo item",
         description="Vamos a crear un item paso a paso.\nTienes **60 segundos** en cada paso.\nEscribe `cancelar` para abortar.",
@@ -358,10 +361,10 @@ async def crearitem(ctx):
 
     stock_txt = "∞ Ilimitado" if stock == -1 else str(stock)
     embed_confirm = discord.Embed(title="📋 Confirmar nuevo item", description="¿Todo correcto? Responde **sí** o **no**.", color=COLOR_SHOP)
-    embed_confirm.add_field(name="Nombre",     value=f"{emoji} {nombre}", inline=True)
-    embed_confirm.add_field(name="Precio",     value=f"${precio:,}",       inline=True)
-    embed_confirm.add_field(name="Stock",      value=stock_txt,            inline=True)
-    embed_confirm.add_field(name="Descripción",value=descripcion,          inline=False)
+    embed_confirm.add_field(name="Nombre",      value=f"{emoji} {nombre}", inline=True)
+    embed_confirm.add_field(name="Precio",      value=f"${precio:,}",      inline=True)
+    embed_confirm.add_field(name="Stock",       value=stock_txt,           inline=True)
+    embed_confirm.add_field(name="Descripción", value=descripcion,         inline=False)
     await ctx.send(embed=embed_confirm)
 
     confirmacion = await pedir("")
@@ -381,7 +384,7 @@ async def crearitem(ctx):
 @bot.command()
 async def editaritem(ctx, item_id: str):
     if not es_admin_guild(ctx):
-        return await ctx.send("❌ Este comando solo puede usarse en el servidor autorizado.")
+        return await ctx.send("❌ Necesitas ser administrador para usar este comando.")
     item_id = item_id.lower()
     if item_id not in tienda:
         return await ctx.send(f"❌ No existe ningún item con ID `{item_id}`.")
@@ -426,7 +429,7 @@ async def editaritem(ctx, item_id: str):
 @bot.command()
 async def borraritem(ctx, item_id: str):
     if not es_admin_guild(ctx):
-        return await ctx.send("❌ Este comando solo puede usarse en el servidor autorizado.")
+        return await ctx.send("❌ Necesitas ser administrador para usar este comando.")
     item_id = item_id.lower()
     if item_id not in tienda:
         return await ctx.send(f"❌ No existe ningún item con ID `{item_id}`.")
@@ -451,7 +454,7 @@ async def borraritem(ctx, item_id: str):
 @bot.command()
 async def stockitem(ctx, item_id: str, cantidad: int):
     if not es_admin_guild(ctx):
-        return await ctx.send("❌ Este comando solo puede usarse en el servidor autorizado.")
+        return await ctx.send("❌ Necesitas ser administrador para usar este comando.")
     item_id = item_id.lower()
     if item_id not in tienda:
         return await ctx.send(f"❌ No existe ningún item con ID `{item_id}`.")
@@ -503,7 +506,7 @@ async def enviar(ctx, objetivo: discord.Member, cantidad: int):
 
 @bot.command(name="add-money")
 async def add_money(ctx, objetivo: discord.Member, cantidad: int):
-    if not es_admin_guild(ctx): return await ctx.send("❌ Este comando solo puede usarse en el servidor autorizado.")
+    if not es_admin_guild(ctx): return await ctx.send("❌ Necesitas ser administrador para usar este comando.")
     if objetivo.bot: return await ctx.send("❌ No puedes dar dinero a un bot.")
     if cantidad <= 0: return await ctx.send("❌ La cantidad debe ser mayor a 0.")
     user = get_user(objetivo.id)
@@ -517,7 +520,7 @@ async def add_money(ctx, objetivo: discord.Member, cantidad: int):
 
 @bot.command(name="remove-money")
 async def remove_money(ctx, objetivo: discord.Member, cantidad: int):
-    if not es_admin_guild(ctx): return await ctx.send("❌ Este comando solo puede usarse en el servidor autorizado.")
+    if not es_admin_guild(ctx): return await ctx.send("❌ Necesitas ser administrador para usar este comando.")
     if objetivo.bot: return await ctx.send("❌ No puedes quitar dinero a un bot.")
     if cantidad <= 0: return await ctx.send("❌ La cantidad debe ser mayor a 0.")
     user = get_user(objetivo.id)
@@ -537,7 +540,7 @@ async def remove_money(ctx, objetivo: discord.Member, cantidad: int):
 
 @bot.command(name="dar-item")
 async def dar_item(ctx, objetivo: discord.Member, item_id: str, cantidad: int = 1):
-    if not es_admin_guild(ctx): return await ctx.send("❌ Este comando solo puede usarse en el servidor autorizado.")
+    if not es_admin_guild(ctx): return await ctx.send("❌ Necesitas ser administrador para usar este comando.")
     if objetivo.bot: return await ctx.send("❌ No puedes dar items a un bot.")
     item_id = item_id.lower()
     if item_id not in tienda: return await ctx.send(f"❌ No existe ningún item con ID `{item_id}`.")
@@ -554,7 +557,7 @@ async def dar_item(ctx, objetivo: discord.Member, item_id: str, cantidad: int = 
 
 @bot.command(name="quitar-item")
 async def quitar_item(ctx, objetivo: discord.Member, item_id: str, cantidad: int = 1):
-    if not es_admin_guild(ctx): return await ctx.send("❌ Este comando solo puede usarse en el servidor autorizado.")
+    if not es_admin_guild(ctx): return await ctx.send("❌ Necesitas ser administrador para usar este comando.")
     if objetivo.bot: return await ctx.send("❌ No puedes quitar items a un bot.")
     item_id = item_id.lower()
     if item_id not in tienda: return await ctx.send(f"❌ No existe ningún item con ID `{item_id}`.")
@@ -571,6 +574,101 @@ async def quitar_item(ctx, objetivo: discord.Member, item_id: str, cantidad: int
     embed.add_field(name="Usuario",  value=objetivo.mention,                    inline=True)
     embed.add_field(name="Item",     value=f"{item['emoji']} {item['nombre']}", inline=True)
     embed.add_field(name="Cantidad", value=f"× {cantidad}",                    inline=True)
+    await ctx.send(embed=embed)
+
+# ════════════════════════════════
+# 🛡️ MODERACIÓN
+# ════════════════════════════════
+
+@bot.command(name="delete", aliases=["clear"])
+@commands.has_permissions(manage_messages=True)
+async def delete(ctx, cantidad: int):
+    if cantidad <= 0 or cantidad > 100:
+        return await ctx.send("❌ Elige un número entre 1 y 100.")
+    await ctx.channel.purge(limit=cantidad + 1)
+    msg = await ctx.send(f"🗑️ Se eliminaron **{cantidad}** mensajes.")
+    await asyncio.sleep(3)
+    await msg.delete()
+
+@bot.command()
+@commands.has_permissions(ban_members=True)
+async def ban(ctx, objetivo: discord.Member, *, razon: str = "Sin razón especificada"):
+    if objetivo == ctx.author:
+        return await ctx.send("❌ No puedes banearte a ti mismo.")
+    if objetivo.top_role >= ctx.author.top_role:
+        return await ctx.send("❌ No puedes banear a alguien con un rol igual o superior al tuyo.")
+    await objetivo.ban(reason=razon)
+    embed = discord.Embed(title="🔨 Usuario baneado", color=COLOR_ERROR)
+    embed.add_field(name="Usuario", value=objetivo.mention, inline=True)
+    embed.add_field(name="Por",     value=ctx.author.mention, inline=True)
+    embed.add_field(name="Razón",   value=razon, inline=False)
+    await ctx.send(embed=embed)
+
+@bot.command()
+@commands.has_permissions(ban_members=True)
+async def unban(ctx, *, nombre: str):
+    banned = [entry async for entry in ctx.guild.bans()]
+    for entry in banned:
+        if str(entry.user) == nombre or str(entry.user.id) == nombre:
+            await ctx.guild.unban(entry.user)
+            embed = discord.Embed(title="✅ Usuario desbaneado", color=COLOR)
+            embed.add_field(name="Usuario", value=str(entry.user), inline=False)
+            return await ctx.send(embed=embed)
+    await ctx.send("❌ No se encontró ningún usuario baneado con ese nombre/ID.")
+
+@bot.command()
+@commands.has_permissions(manage_messages=True)
+async def warn(ctx, objetivo: discord.Member, *, razon: str = "Sin razón especificada"):
+    if objetivo.bot:
+        return await ctx.send("❌ No puedes warnear a un bot.")
+    if objetivo == ctx.author:
+        return await ctx.send("❌ No puedes warnearte a ti mismo.")
+    uid = str(objetivo.id)
+    gid = str(ctx.guild.id)
+    if gid not in warns_db:
+        warns_db[gid] = {}
+    if uid not in warns_db[gid]:
+        warns_db[gid][uid] = []
+    warns_db[gid][uid].append({
+        "razon": razon,
+        "por": str(ctx.author),
+        "fecha": int(time.time())
+    })
+    await guardar_warns()
+    total = len(warns_db[gid][uid])
+    embed = discord.Embed(title="⚠️ Advertencia aplicada", color=discord.Color.yellow())
+    embed.add_field(name="Usuario",     value=objetivo.mention,   inline=True)
+    embed.add_field(name="Por",         value=ctx.author.mention, inline=True)
+    embed.add_field(name="Razón",       value=razon,              inline=False)
+    embed.add_field(name="Total warns", value=f"**{total}**",     inline=False)
+    embed.set_footer(text=f"ID: {objetivo.id}")
+    await ctx.send(embed=embed)
+
+@bot.command()
+@commands.has_permissions(manage_messages=True)
+async def warns(ctx, objetivo: discord.Member):
+    uid = str(objetivo.id)
+    gid = str(ctx.guild.id)
+    lista = warns_db.get(gid, {}).get(uid, [])
+    if not lista:
+        return await ctx.send(f"✅ {objetivo.mention} no tiene advertencias.")
+    embed = discord.Embed(title=f"⚠️ Warns de {objetivo.display_name}", color=discord.Color.yellow())
+    for i, w in enumerate(lista, 1):
+        fecha = time.strftime("%d/%m/%Y", time.localtime(w["fecha"]))
+        embed.add_field(name=f"#{i} — {fecha}", value=f"**Razón:** {w['razon']}\n**Por:** {w['por']}", inline=False)
+    embed.set_footer(text=f"Total: {len(lista)} advertencia(s)")
+    await ctx.send(embed=embed)
+
+@bot.command()
+@commands.has_permissions(manage_messages=True)
+async def clearwarns(ctx, objetivo: discord.Member):
+    uid = str(objetivo.id)
+    gid = str(ctx.guild.id)
+    if gid in warns_db and uid in warns_db[gid]:
+        warns_db[gid][uid] = []
+        await guardar_warns()
+    embed = discord.Embed(title="🧹 Warns eliminados", color=COLOR)
+    embed.add_field(name="Usuario", value=objetivo.mention, inline=False)
     await ctx.send(embed=embed)
 
 # ════════════════════════════════
@@ -699,9 +797,9 @@ async def bj(ctx, apuesta: int):
         resultado = f"❌ Perdiste **-${apuesta:,}**"
     await guardar_db()
     embed = discord.Embed(title="🃏 Resultado", color=COLOR)
-    embed.add_field(name="Tú", value=str(pj), inline=True)
-    embed.add_field(name="Dealer", value=str(pd), inline=True)
-    embed.add_field(name="Resultado", value=resultado, inline=False)
+    embed.add_field(name="Tú",       value=str(pj),   inline=True)
+    embed.add_field(name="Dealer",   value=str(pd),   inline=True)
+    embed.add_field(name="Resultado",value=resultado, inline=False)
     embed.set_footer(text=f"Cartera: ${user['balance']:,}")
     await ctx.send(embed=embed)
 
@@ -749,9 +847,9 @@ async def dados(ctx, apuesta: int, numero: int):
         texto = f"❌ Perdiste **-${apuesta:,}**"
     await guardar_db()
     embed = discord.Embed(title="🎲 Dados", color=COLOR)
-    embed.add_field(name="Resultado",  value=f"🎲 {d1} + 🎲 {d2} = **{total}**", inline=False)
-    embed.add_field(name="Tu número",  value=str(numero),                          inline=True)
-    embed.add_field(name="Resultado",  value=texto,                                inline=False)
+    embed.add_field(name="Resultado", value=f"🎲 {d1} + 🎲 {d2} = **{total}**", inline=False)
+    embed.add_field(name="Tu número", value=str(numero),                          inline=True)
+    embed.add_field(name="Resultado", value=texto,                                inline=False)
     embed.set_footer(text=f"Cartera: ${user['balance']:,}")
     await ctx.send(embed=embed)
 
@@ -765,6 +863,5 @@ async def on_ready():
     print(f"✅ {bot.user} conectado")
     print(f"📡 Servidores: {len(bot.guilds)}")
     print(f"🏪 Items en tienda: {len(tienda)}")
-    print(f"🔒 Servidor admin: {ADMIN_GUILD_ID}")
 
 bot.run(TOKEN)
