@@ -10,7 +10,10 @@ import time
 # ════════════════════════════════
 # 🔐 TOKEN — pon tu token aquí directamente
 # ════════════════════════════════
+#<<<<<<< HEAD
 
+#=======
+#>>>>>>> f535446d2e35c8e82e3932b4751dfe9353aaefc6
 TOKEN = os.getenv("DISCORD_TOKEN")
 if not TOKEN:
     raise ValueError("❌ No se encontró DISCORD_TOKEN en las variables de entorno.")
