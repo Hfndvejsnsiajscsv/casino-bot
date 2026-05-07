@@ -1,5 +1,4 @@
 
-TOKEN = "MTQ5OTM3MjQ2NzAzMzA4Mzk0NA.Gi4i5v.bCMT_kljaYzeJdnrd_sHzC4B98CcBFEnLM8y2g"
 import discord
 from discord.ext import commands
 import random
