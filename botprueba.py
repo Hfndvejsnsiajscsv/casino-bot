@@ -55,14 +55,19 @@ async def guardar_warns():
         with open("warns.json", "w") as f:
             json.dump(warns_db, f, indent=4)
 
+# ════════════════════════════════
+# FIX #1: get_user protege claves faltantes en usuarios existentes
+# ════════════════════════════════
 def get_user(uid):
     uid = str(uid)
     if uid not in db:
         db[uid] = {"balance": 1000, "banco": 0, "last_daily": 0, "last_trabajo": 0, "inventario": {}}
-    if "last_trabajo" not in db[uid]:
-        db[uid]["last_trabajo"] = 0
-    if "inventario" not in db[uid]:
-        db[uid]["inventario"] = {}
+    # Migración segura: añadir claves faltantes para usuarios con datos antiguos
+    if "balance"      not in db[uid]: db[uid]["balance"]      = 1000
+    if "banco"        not in db[uid]: db[uid]["banco"]        = 0
+    if "last_daily"   not in db[uid]: db[uid]["last_daily"]   = 0
+    if "last_trabajo" not in db[uid]: db[uid]["last_trabajo"] = 0
+    if "inventario"   not in db[uid]: db[uid]["inventario"]   = {}
     return db[uid]
 
 def generar_item_id():
@@ -232,11 +237,18 @@ async def retirar(ctx, cantidad: int):
     await guardar_db()
     await ctx.send(f"💸 Retiraste **${cantidad:,}** del banco. Cartera: **${user['balance']:,}**")
 
+# ════════════════════════════════
+# FIX #2: ranking usa .get() para evitar KeyError con datos corruptos/antiguos
+# ════════════════════════════════
 @bot.command()
 async def ranking(ctx):
     if not db:
         return await ctx.send("📊 No hay datos aún.")
-    top = sorted(db.items(), key=lambda x: x[1]["balance"] + x[1]["banco"], reverse=True)[:5]
+    top = sorted(
+        db.items(),
+        key=lambda x: x[1].get("balance", 0) + x[1].get("banco", 0),
+        reverse=True
+    )[:5]
     embed    = discord.Embed(title="🏆 Top 5 Más Ricos", color=COLOR)
     medallas = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
     for i, (uid, data) in enumerate(top):
@@ -245,7 +257,8 @@ async def ranking(ctx):
             nombre = u.display_name
         except Exception:
             nombre = f"Usuario {uid}"
-        embed.add_field(name=f"{medallas[i]} {nombre}", value=f"**${data['balance']+data['banco']:,}**", inline=False)
+        total = data.get("balance", 0) + data.get("banco", 0)
+        embed.add_field(name=f"{medallas[i]} {nombre}", value=f"**${total:,}**", inline=False)
     await ctx.send(embed=embed)
 
 # ════════════════════════════════
@@ -490,6 +503,9 @@ async def enviar(ctx, objetivo: discord.Member, cantidad: int):
         return await ctx.send("⏰ Tiempo agotado. Transferencia cancelada.")
     if str(reaction.emoji) == "❌":
         return await ctx.send("🚫 Transferencia cancelada.")
+    # FIX #10: Re-verificar saldo justo antes de transferir
+    if cantidad > remitente["balance"]:
+        return await ctx.send("❌ Tu saldo cambió y ya no tienes suficiente para esta transferencia.")
     remitente["balance"] -= cantidad
     receptor["balance"]  += cantidad
     await guardar_db()
@@ -756,6 +772,7 @@ async def bj(ctx, apuesta: int):
     await guardar_db()
     mano_jugador = sacar_carta(sacar_carta([]))
     mano_dealer  = sacar_carta(sacar_carta([]))
+
     def make_embed(estado="jugando"):
         embed = discord.Embed(title="🃏 Blackjack", color=COLOR)
         embed.add_field(name="Tu mano", value=mano_str(mano_jugador), inline=False)
@@ -765,41 +782,78 @@ async def bj(ctx, apuesta: int):
         else:
             embed.add_field(name="Dealer", value=mano_str(mano_dealer), inline=False)
         return embed
+
+    # Blackjack natural
     if valor_mano(mano_jugador) == 21:
-        ganancia = int(apuesta * 2.5); user["balance"] += ganancia; await guardar_db()
-        embed = make_embed("fin"); embed.add_field(name="🎴 ¡BLACKJACK!", value=f"+${ganancia:,}", inline=False)
+        ganancia = int(apuesta * 2.5)
+        user["balance"] += ganancia
+        await guardar_db()
+        embed = make_embed("fin")
+        embed.add_field(name="🎴 ¡BLACKJACK!", value=f"+${ganancia:,}", inline=False)
+        embed.set_footer(text=f"Cartera: ${user['balance']:,}")
         return await ctx.send(embed=embed)
+
     msg = await ctx.send(embed=make_embed())
-    await msg.add_reaction("✅"); await msg.add_reaction("❌")
+    await msg.add_reaction("✅")
+    await msg.add_reaction("❌")
+
+    timed_out = False
     while True:
         try:
             reaction, _ = await bot.wait_for("reaction_add", timeout=30.0,
-                check=lambda r, u: u == ctx.author and str(r.emoji) in ["✅","❌"] and r.message.id == msg.id)
+                check=lambda r, u: u == ctx.author and str(r.emoji) in ["✅", "❌"] and r.message.id == msg.id)
         except asyncio.TimeoutError:
-            await msg.edit(content="⏰ Tiempo agotado. Te plantaste automáticamente."); break
+            timed_out = True
+            break
+
         if str(reaction.emoji) == "✅":
             mano_jugador = sacar_carta(mano_jugador)
             if valor_mano(mano_jugador) > 21:
+                # FIX #4: El dealer no juega si el jugador se pasa — embed correcto
+                try: await msg.clear_reactions()
+                except Exception: pass
                 await msg.edit(embed=make_embed("fin"), content="")
                 embed = discord.Embed(title="🃏 Blackjack", color=discord.Color.red())
                 embed.add_field(name="💥 Te pasaste", value=f"Perdiste **-${apuesta:,}**")
-                await ctx.send(embed=embed); return
+                embed.set_footer(text=f"Cartera: ${user['balance']:,}")
+                await ctx.send(embed=embed)
+                return
             await msg.edit(embed=make_embed())
-        else: break
-    while valor_mano(mano_dealer) < 17: mano_dealer = sacar_carta(mano_dealer)
-    pj = valor_mano(mano_jugador); pd = valor_mano(mano_dealer)
-    await msg.edit(embed=make_embed("fin"))
+        else:
+            break
+
+    # Limpiar reacciones al terminar
+    try: await msg.clear_reactions()
+    except Exception: pass
+
+    # Dealer juega
+    while valor_mano(mano_dealer) < 17:
+        mano_dealer = sacar_carta(mano_dealer)
+
+    pj = valor_mano(mano_jugador)
+    pd = valor_mano(mano_dealer)
+
+    # FIX #3: content="" limpia el mensaje de timeout antes de mostrar el embed final
+    await msg.edit(embed=make_embed("fin"), content="")
+
+    if timed_out:
+        await ctx.send("⏰ Tiempo agotado. Te plantaste automáticamente.")
+
     if pd > 21 or pj > pd:
-        ganancia = apuesta * 2; user["balance"] += ganancia; resultado = f"✅ ¡Ganaste **+${ganancia:,}**!"
+        ganancia = apuesta * 2
+        user["balance"] += ganancia
+        resultado = f"✅ ¡Ganaste **+${ganancia:,}**!"
     elif pj == pd:
-        user["balance"] += apuesta; resultado = f"🤝 Empate. Recuperas **${apuesta:,}**"
+        user["balance"] += apuesta
+        resultado = f"🤝 Empate. Recuperas **${apuesta:,}**"
     else:
         resultado = f"❌ Perdiste **-${apuesta:,}**"
+
     await guardar_db()
     embed = discord.Embed(title="🃏 Resultado", color=COLOR)
-    embed.add_field(name="Tú",       value=str(pj),   inline=True)
-    embed.add_field(name="Dealer",   value=str(pd),   inline=True)
-    embed.add_field(name="Resultado",value=resultado, inline=False)
+    embed.add_field(name="Tú",        value=str(pj),   inline=True)
+    embed.add_field(name="Dealer",    value=str(pd),   inline=True)
+    embed.add_field(name="Resultado", value=resultado, inline=False)
     embed.set_footer(text=f"Cartera: ${user['balance']:,}")
     await ctx.send(embed=embed)
 
@@ -840,7 +894,7 @@ async def dados(ctx, apuesta: int, numero: int):
     user["balance"] -= apuesta
     d1 = random.randint(1, 6); d2 = random.randint(1, 6); total = d1 + d2
     if total == numero:
-        mult = {2:10,3:8,4:6,5:5,6:4,7:3,8:4,9:5,10:6,11:8,12:10}[numero]
+        mult = {2:10, 3:8, 4:6, 5:5, 6:4, 7:3, 8:4, 9:5, 10:6, 11:8, 12:10}[numero]
         ganancia = apuesta * mult; user["balance"] += ganancia
         texto = f"✅ ¡Ganaste **+${ganancia:,}** (x{mult})!"
     else:
@@ -864,4 +918,6 @@ async def on_ready():
     print(f"📡 Servidores: {len(bot.guilds)}")
     print(f"🏪 Items en tienda: {len(tienda)}")
 
+# FIX #5: Cargar DB también antes de bot.run() por si acaso
+cargar_db()
 bot.run(TOKEN)
